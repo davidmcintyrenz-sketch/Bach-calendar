@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bach Calendar — McIntyre / Maude</title>
+<style>
+  :root{
+    --bg:#0f1222;--card:#141a33;--ink:#e7ecfd;--muted:#9aa6c6;--line:#23305a;
+    --blue:#3b82f6;--green:#16a34a;--ring:rgba(94,161,255,.45)
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:16px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .controls{display:flex;gap:6px;align-items:center}
+  button,select,input{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:16px}
+  button{cursor:pointer} button.primary{background:linear-gradient(180deg,#5ea1ff,#356ed6);border-color:#356ed6;color:white}
+  .calendar{border:1px solid var(--line);border-radius:16px;padding:12px;background:linear-gradient(180deg,#141a33,#10162a)}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .dow{font-size:12px;color:var(--muted);text-align:center;padding:6px 0}
+  .cell{
+    border:1px solid #1b2548;border-radius:14px;aspect-ratio:1/1;
+    padding:10px; display:flex; align-items:flex-start; justify-content:flex-end;
+    background:linear-gradient(180deg,#1a2346,#121a34); position:relative; overflow:hidden;
+    touch-action: manipulation;
+  }
+  .cell::after{content:""; position:absolute; inset:-4px; border-radius:16px;} /* bigger hit area */
+  .dim{opacity:.45}
+  .inrange{background:linear-gradient(180deg,#223066,#121a34)}
+  .start{outline:3px solid var(--ring); outline-offset:-3px}
+  /* Strong "today" glow (label removed) */
+  .today{
+    outline: 3px solid #f59e0b; outline-offset:-3px;
+    box-shadow:0 0 6px 2px rgba(245,158,11,0.5);
+    background:linear-gradient(180deg,#27346a,#121a34);
+  }
+  .today .date{background:#f59e0b;color:#111;border-radius:6px;padding:2px 6px;font-weight:700;}
+  .date{font-size:14px;color:#cbd5e1}
+  /* underline feature removed */
+  .names{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;font-size:12px;text-align:center;pointer-events:none}
+  .barbox{position:absolute;left:0;right:0;bottom:0;height:6px;display:flex;gap:1px}
+  .seg{flex:1} .seg.mc{background:var(--blue)} .seg.ma{background:var(--green)}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
+  .hint{font-size:13px;color:var(--muted)}
+  .list{display:grid;grid-template-columns:1fr;gap:8px}
+  .item{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:10px}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  @media(min-width:760px){.list{grid-template-columns:1fr 1fr}}
+  .auth{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#111827;color:#e5e7eb;padding:10px 14px;border-radius:999px;border:1px solid #374151;opacity:0;pointer-events:none;transition:opacity .2s}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><strong>Bach Calendar — Shared Only</strong>
+      <div class="hint">Login required. Both families see all; only the creator can edit/delete.</div>
+    </div>
+    <div class="controls">
+      <button id="prev">◀ Prev</button>
+      <strong id="label"></strong>
+      <button id="next">Next ▶</button>
+      <button id="today">Today</button>
+    </div>
+  </header>
+
+  <section class="auth">
+    <input id="email" type="email" placeholder="Email" />
+    <input id="password" type="password" placeholder="Password (min 6 chars)" />
+    <button id="signIn" class="primary">Sign in</button>
+    <button id="signOut" disabled>Sign out</button>
+    <span id="authStatus" class="hint"></span>
+  </section>
+
+  <section class="calendar">
+    <div class="grid" id="dow"></div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <div class="bar">
+    <label>Family
+      <select id="family">
+        <option value="mcintyre">McIntyre</option>
+        <option value="maude">Maude</option>
+      </select>
+    </label>
+    <input id="note" type="text" placeholder="Optional note" />
+    <button id="block" class="primary" disabled>Block Dates</button>
+    <button id="clear">Clear</button>
+    <span id="status" class="hint"></span>
+  </div>
+
+  <div id="hint" class="hint">Tap a start date to begin. Single day? Tap once then press Block.</div>
+  <div id="list" class="list"></div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ====== CONFIG — fill these before using ====== */
+const SUPABASE_URL = "https://zrujwzhglvzyuzxnyqqa.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpydWp3emhnbHZ6eXV6eG55cXFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MDQyNTMsImV4cCI6MjA3NDE4MDI1M30.Ww0JyomrWb_3SeST5SlO4WGdrvTkEg7Qz6l1u5tOuGg";
+const ALLOWED_EMAILS = ["davidmcintyrenz@gmail.com","dannymaude@hotmail.com"];
+const EMAIL_TO_FAMILY = {
+  "davidmcintyrenz@gmail.com": "mcintyre",
+  "dannymaude@hotmail.com": "maude"
+};
+/* ============================================== */
+
+const supa = (SUPABASE_URL && SUPABASE_ANON_KEY) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const FAMILIES = { mcintyre:"McIntyre", maude:"Maude" };
+
+let month = new Date(); month.setDate(1);
+let selStart = null, selEnd = null;
+let sharedBookings = [];
+let session = null;
+
+const $ = id => document.getElementById(id);
+const label=$("label"), prev=$("prev"), next=$("next"), today=$("today");
+const grid=$("grid"), dow=$("dow");
+const block=$("block"), clearBtn=$("clear"), family=$("family"), note=$("note");
+const list=$("list"), hint=$("hint"), status=$("status");
+const email=$("email"), password=$("password"), signIn=$("signIn"), signOut=$("signOut"), authStatus=$("authStatus");
+const toast=$("toast");
+
+/* DOW header */
+["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].forEach(d=>{const el=document.createElement("div");el.className="dow";el.textContent=d;dow.appendChild(el);});
+
+/* Date helpers */
+const ymdLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parseYmdLocal = s => new Date(`${s}T00:00:00`);
+const mmmy = d => d.toLocaleString(undefined,{month:"long",year:"numeric"});
+const dm = d => d.toLocaleDateString(undefined,{day:"numeric",month:"short"});
+function startOfWeekMon(d){const day=(d.getDay()+6)%7,s=new Date(d);s.setDate(d.getDate()-day);s.setHours(0,0,0,0);return s;}
+function endOfWeekMon(d){const s=startOfWeekMon(d),e=new Date(s);e.setDate(e.getDate()+6);e.setHours(23,59,59,999);return e;}
+function endOfMonth(d){const x=new Date(d);x.setMonth(x.getMonth()+1,0);x.setHours(23,59,59,999);return x;}
+function eachDay(a,b){const out=[];const cur=new Date(a);cur.setHours(0,0,0,0);const stop=new Date(b);stop.setHours(0,0,0,0);while(cur<=stop){out.push(new Date(cur));cur.setDate(cur.getDate()+1);}return out;}
+
+function showToast(msg){toast.textContent=msg;toast.classList.add("show");setTimeout(()=>toast.classList.remove("show"),1500);}
+
+/* RENDER */
+function render(){
+  label.textContent = mmmy(month);
+  const start=startOfWeekMon(new Date(month));
+  const end=endOfWeekMon(endOfMonth(new Date(month)));
+  const days=eachDay(start,end);
+  grid.innerHTML="";
+
+  const byDay=new Map();for(const d of days)byDay.set(ymdLocal(d),[]);
+  for(const b of sharedBookings){
+    const s=parseYmdLocal(b.start_date), e=parseYmdLocal(b.end_date);
+    for(const d of eachDay(s,e)){const k=ymdLocal(d);if(byDay.has(k))byDay.get(k).push(b);}
+  }
+
+  const todayKey=ymdLocal(new Date());
+
+  for(const d of days){
+    const cell=document.createElement("div");
+    const inMonth=d.getMonth()===month.getMonth();
+    const inRange = (selStart && (selEnd ? d>=selStart && d<=selEnd : d.getTime()===selStart.getTime()));
+    const isStart = selStart && d.getTime()===selStart.getTime();
+    const isToday=ymdLocal(d)===todayKey;
+
+    cell.className="cell"+(inMonth?"":" dim")+(inRange?" inrange":"")+(isStart?" start":"")+(isToday?" today":"");
+
+    const lbl=document.createElement("div"); lbl.className="date"; lbl.textContent=d.getDate(); cell.appendChild(lbl);
+
+    const items=byDay.get(ymdLocal(d))||[];
+
+    if(items.length){
+      /* centered family names */
+      const namesBox=document.createElement("div"); namesBox.className="names";
+      items.slice(0,2).forEach(b=>{
+        const name=document.createElement("div"); name.textContent=FAMILIES[b.family]||b.family;
+        namesBox.appendChild(name);
+      });
+      if(items.length>2){
+        const more=document.createElement("div"); more.textContent="+"+(items.length-2); namesBox.appendChild(more);
+      }
+      cell.appendChild(namesBox);
+
+      /* bottom colour bars */
+      const barBox=document.createElement("div"); barBox.className="barbox";
+      items.forEach(b=>{
+        const seg=document.createElement("div"); seg.className="seg "+(b.family==="mcintyre"?"mc":"ma");
+        barBox.appendChild(seg);
+      });
+      cell.appendChild(barBox);
+    }
+
+    /* tap to pick start/end quickly */
+    cell.addEventListener("click", ()=>{
+      if(selStart && selEnd){
+        selStart = d; selEnd = null;             // third tap → start new
+      } else if(selStart && !selEnd){
+        if(d < selStart){ selEnd = selStart; selStart = d; } else { selEnd = d; }  // second tap
+      } else {
+        selStart = d; selEnd = null;             // first tap
+      }
+      block.disabled = !(!!session && !!selStart); // allow single-day
+      hint.textContent = !session
+        ? "Sign in to save"
+        : (!selEnd ? "Now tap an end date, or press Block to book one day." : "Press Block to save the selected dates.");
+      render();
+    });
+
+    grid.appendChild(cell);
+  }
+
+  /* monthly list */
+  list.innerHTML="";
+  const mStart=new Date(month); mStart.setDate(1); mStart.setHours(0,0,0,0);
+  const mEnd=endOfMonth(new Date(month));
+  const flat=(sharedBookings||[])
+    .filter(b=>{const s=parseYmdLocal(b.start_date),e=parseYmdLocal(b.end_date);return !(e<mStart||s>mEnd);})
+    .sort((a,b)=>+parseYmdLocal(a.start_date)-+parseYmdLocal(b.start_date));
+  for(const b of flat){
+    const item=document.createElement("div"); item.className="item";
+    const s=parseYmdLocal(b.start_date), e=parseYmdLocal(b.end_date);
+    const canEdit = session && b.created_by === session.user.email;
+    item.innerHTML = `
+      <div>
+        <div><strong>${dm(s)} → ${dm(e)}</strong></div>
+        <div class="hint">
+          <span class="dot" style="background:${b.family==='maude'?'var(--green)':'var(--blue)'}"></span>
+          ${FAMILIES[b.family]||b.family}${b.note ? " — "+(b.note||"") : ""}
+          ${b.created_by ? ` • <em>by ${b.created_by}</em>` : ""}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="editBtn" ${canEdit?"":"disabled"}>Edit</button>
+        <button class="delBtn" ${canEdit?"":"disabled"} style="color:#ef4444;border-color:#ef4444">Delete</button>
+      </div>`;
+    item.querySelector(".delBtn").addEventListener("click", async ()=>{
+      if(!confirm("Delete this booking?")) return;
+      if(!session || !supa){ alert("Sign in first."); return; }
+      const { error } = await supa.from("bookings").delete().eq("id", b.id);
+      if(error){ alert("Error deleting: "+error.message); }
+      await syncShared();
+    });
+    item.querySelector(".editBtn").addEventListener("click", async ()=>{
+      if(!session || !supa){ alert("Sign in first."); return; }
+      const newNote = prompt("Update note:", b.note||"");
+      if(newNote===null) return;
+      const { error } = await supa.from("bookings").update({ note: newNote }).eq("id", b.id);
+      if(error){ alert("Error updating: "+error.message); }
+      await syncShared();
+    });
+    list.appendChild(item);
+  }
+}
+
+/* Save (single-day if no selEnd) */
+async function addBooking(){
+  if(!session || !supa){ alert("Sign in first."); return; }
+  if(!selStart && !selEnd){ return; }
+  const start = selStart;
+  const end = selEnd || selStart; // single day
+  const row={ family:family.value, start_date:ymdLocal(start), end_date:ymdLocal(end), note:note.value.trim()||null, created_by:session.user.email };
+  status.textContent="Saving…";
+  const { error } = await supa.from("bookings").insert(row);
+  if(error){ alert("Error saving: "+error.message); status.textContent=""; return; }
+  selStart=null; selEnd=null; block.disabled=true; note.value="";
+  await syncShared(); status.textContent="Saved."; showToast("Booked ✔");
+}
+
+/* Sync */
+async function syncShared(){
+  if(!supa || !session){ status.textContent=""; return; }
+  status.textContent="Syncing…";
+  const { data, error } = await supa.from("bookings").select("*").order("start_date");
+  if(error){ status.textContent="Error: "+error.message; return; }
+  sharedBookings = data || []; status.textContent=""; render();
+}
+
+/* Auth — single, final version */
+async function refreshSession(){
+  if(!supa) return;
+  const { data } = await supa.auth.getSession();
+  session = data.session || null;
+
+  signOut.disabled = !session;
+  authStatus.textContent = session ? `Signed in as ${session.user.email}` : "Not signed in";
+  block.disabled = !(!!session && !!selStart);
+
+  if(session){
+    if(ALLOWED_EMAILS.length && !ALLOWED_EMAILS.includes(session.user.email)){
+      authStatus.textContent = "This email is not allowed.";
+      await supa.auth.signOut(); 
+      session = null;
+    } else {
+      // auto-select family colour by email
+      const autoFam = EMAIL_TO_FAMILY[session.user.email];
+      if (autoFam) {
+        family.value = autoFam;
+        // family.disabled = true; // lock if you want
+      }
+      await syncShared();
+      showToast("Signed in");
+    }
+  } else {
+    // family.disabled = false; // re-enable if locked above
+    sharedBookings = []; 
+    render();
+  }
+}
+if(supa){ supa.auth.onAuthStateChange((_e,_s)=>{ session=_s; refreshSession(); }); }
+
+signIn.addEventListener("click", async ()=>{
+  if(!supa) return alert("Add SUPABASE_URL and ANON KEY first.");
+  authStatus.textContent = "Signing in…";
+  const { data, error } = await supa.auth.signInWithPassword({ email: email.value.trim(), password: password.value });
+  if (error) { authStatus.textContent = "Sign-in error: " + error.message; }
+  else { authStatus.textContent = "Signed in as " + data.user.email; showToast("Signed in"); }
+});
+signOut.addEventListener("click", async ()=>{ if(!supa) return; await supa.auth.signOut(); showToast("Signed out"); });
+
+prev.addEventListener("click", ()=>{ month.setMonth(month.getMonth()-1); render(); });
+next.addEventListener("click", ()=>{ month.setMonth(month.getMonth()+1,1); render(); });
+today.addEventListener("click", ()=>{ month=new Date(); month.setDate(1); render(); });
+clearBtn.addEventListener("click", ()=>{ selStart=null; selEnd=null; block.disabled=!session; hint.textContent="Tap a start date to begin."; render(); });
+block.addEventListener("click", addBooking);
+
+/* boot */
+render(); refreshSession();
+</script>
+</body>
+</html>
