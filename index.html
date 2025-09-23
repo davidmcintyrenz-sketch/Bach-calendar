@@ -25,22 +25,40 @@
     background:linear-gradient(180deg,#1a2346,#121a34); position:relative; overflow:hidden;
     touch-action: manipulation;
   }
-  .cell::after{content:""; position:absolute; inset:-4px; border-radius:16px;} /* bigger hit area */
+  .cell::after{content:""; position:absolute; inset:-4px; border-radius:16px;}
   .dim{opacity:.45}
   .inrange{background:linear-gradient(180deg,#223066,#121a34)}
   .start{outline:3px solid var(--ring); outline-offset:-3px}
-  /* Strong "today" glow (label removed) */
+
+  /* Solid fills for booked days */
+  .booked-mc{
+    background: var(--blue) !important;
+    color:#fff;
+  }
+  .booked-ma{
+    background: var(--green) !important;
+    color:#fff;
+  }
+  .booked-both{
+    background: linear-gradient(135deg, var(--blue) 0 50%, var(--green) 50% 100%) !important;
+    color:#fff;
+  }
+  .booked-mc .date,
+  .booked-ma .date,
+  .booked-both .date{
+    color:#fff;
+    font-weight:700;
+    text-shadow: 0 1px 2px rgba(0,0,0,.35);
+  }
+
+  /* Today highlight stays visible */
   .today{
     outline: 3px solid #f59e0b; outline-offset:-3px;
     box-shadow:0 0 6px 2px rgba(245,158,11,0.5);
-    background:linear-gradient(180deg,#27346a,#121a34);
   }
   .today .date{background:#f59e0b;color:#111;border-radius:6px;padding:2px 6px;font-weight:700;}
+
   .date{font-size:14px;color:#cbd5e1}
-  /* underline feature removed */
-  .names{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;font-size:12px;text-align:center;pointer-events:none}
-  .barbox{position:absolute;left:0;right:0;bottom:0;height:6px;display:flex;gap:1px}
-  .seg{flex:1} .seg.mc{background:var(--blue)} .seg.ma{background:var(--green)}
   .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
   .hint{font-size:13px;color:var(--muted)}
   .list{display:grid;grid-template-columns:1fr;gap:8px}
@@ -100,7 +118,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-/* ====== CONFIG — fill these before using ====== */
+/* ===== CONFIG (yours) ===== */
 const SUPABASE_URL = "https://zrujwzhglvzyuzxnyqqa.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpydWp3emhnbHZ6eXV6eG55cXFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MDQyNTMsImV4cCI6MjA3NDE4MDI1M30.Ww0JyomrWb_3SeST5SlO4WGdrvTkEg7Qz6l1u5tOuGg";
 const ALLOWED_EMAILS = ["davidmcintyrenz@gmail.com","dannymaude@hotmail.com"];
@@ -108,7 +126,7 @@ const EMAIL_TO_FAMILY = {
   "davidmcintyrenz@gmail.com": "mcintyre",
   "dannymaude@hotmail.com": "maude"
 };
-/* ============================================== */
+/* ========================= */
 
 const supa = (SUPABASE_URL && SUPABASE_ANON_KEY) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 const FAMILIES = { mcintyre:"McIntyre", maude:"Maude" };
@@ -170,37 +188,28 @@ function render(){
 
     const items=byDay.get(ymdLocal(d))||[];
 
-    if(items.length){
-      /* centered family names */
-      const namesBox=document.createElement("div"); namesBox.className="names";
-      items.slice(0,2).forEach(b=>{
-        const name=document.createElement("div"); name.textContent=FAMILIES[b.family]||b.family;
-        namesBox.appendChild(name);
-      });
-      if(items.length>2){
-        const more=document.createElement("div"); more.textContent="+"+(items.length-2); namesBox.appendChild(more);
+    /* Solid colour fill */
+    if (items.length) {
+      const fams = new Set(items.map(b => b.family));
+      if (fams.has('mcintyre') && fams.has('maude')) {
+        cell.classList.add('booked-both');
+      } else if (fams.has('mcintyre')) {
+        cell.classList.add('booked-mc');
+      } else if (fams.has('maude')) {
+        cell.classList.add('booked-ma');
       }
-      cell.appendChild(namesBox);
-
-      /* bottom colour bars */
-      const barBox=document.createElement("div"); barBox.className="barbox";
-      items.forEach(b=>{
-        const seg=document.createElement("div"); seg.className="seg "+(b.family==="mcintyre"?"mc":"ma");
-        barBox.appendChild(seg);
-      });
-      cell.appendChild(barBox);
     }
 
-    /* tap to pick start/end quickly */
+    /* click to choose start/end */
     cell.addEventListener("click", ()=>{
       if(selStart && selEnd){
-        selStart = d; selEnd = null;             // third tap → start new
+        selStart = d; selEnd = null;
       } else if(selStart && !selEnd){
-        if(d < selStart){ selEnd = selStart; selStart = d; } else { selEnd = d; }  // second tap
+        if(d < selStart){ selEnd = selStart; selStart = d; } else { selEnd = d; }
       } else {
-        selStart = d; selEnd = null;             // first tap
+        selStart = d; selEnd = null;
       }
-      block.disabled = !(!!session && !!selStart); // allow single-day
+      block.disabled = !(!!session && !!selStart);
       hint.textContent = !session
         ? "Sign in to save"
         : (!selEnd ? "Now tap an end date, or press Block to book one day." : "Press Block to save the selected dates.");
@@ -210,7 +219,7 @@ function render(){
     grid.appendChild(cell);
   }
 
-  /* monthly list */
+  /* monthly list below the calendar */
   list.innerHTML="";
   const mStart=new Date(month); mStart.setDate(1); mStart.setHours(0,0,0,0);
   const mEnd=endOfMonth(new Date(month));
@@ -253,12 +262,12 @@ function render(){
   }
 }
 
-/* Save (single-day if no selEnd) */
+/* Save booking */
 async function addBooking(){
   if(!session || !supa){ alert("Sign in first."); return; }
   if(!selStart && !selEnd){ return; }
   const start = selStart;
-  const end = selEnd || selStart; // single day
+  const end = selEnd || selStart; // single day if no end picked
   const row={ family:family.value, start_date:ymdLocal(start), end_date:ymdLocal(end), note:note.value.trim()||null, created_by:session.user.email };
   status.textContent="Saving…";
   const { error } = await supa.from("bookings").insert(row);
@@ -267,7 +276,7 @@ async function addBooking(){
   await syncShared(); status.textContent="Saved."; showToast("Booked ✔");
 }
 
-/* Sync */
+/* Sync bookings */
 async function syncShared(){
   if(!supa || !session){ status.textContent=""; return; }
   status.textContent="Syncing…";
@@ -276,39 +285,32 @@ async function syncShared(){
   sharedBookings = data || []; status.textContent=""; render();
 }
 
-/* Auth — single, final version */
+/* Auth */
 async function refreshSession(){
   if(!supa) return;
   const { data } = await supa.auth.getSession();
   session = data.session || null;
-
   signOut.disabled = !session;
   authStatus.textContent = session ? `Signed in as ${session.user.email}` : "Not signed in";
   block.disabled = !(!!session && !!selStart);
-
   if(session){
     if(ALLOWED_EMAILS.length && !ALLOWED_EMAILS.includes(session.user.email)){
       authStatus.textContent = "This email is not allowed.";
       await supa.auth.signOut(); 
       session = null;
     } else {
-      // auto-select family colour by email
       const autoFam = EMAIL_TO_FAMILY[session.user.email];
-      if (autoFam) {
-        family.value = autoFam;
-        // family.disabled = true; // lock if you want
-      }
+      if (autoFam) { family.value = autoFam; }
       await syncShared();
       showToast("Signed in");
     }
   } else {
-    // family.disabled = false; // re-enable if locked above
-    sharedBookings = []; 
-    render();
+    sharedBookings = []; render();
   }
 }
 if(supa){ supa.auth.onAuthStateChange((_e,_s)=>{ session=_s; refreshSession(); }); }
 
+/* UI events */
 signIn.addEventListener("click", async ()=>{
   if(!supa) return alert("Add SUPABASE_URL and ANON KEY first.");
   authStatus.textContent = "Signing in…";
@@ -319,13 +321,19 @@ signIn.addEventListener("click", async ()=>{
 signOut.addEventListener("click", async ()=>{ if(!supa) return; await supa.auth.signOut(); showToast("Signed out"); });
 
 prev.addEventListener("click", ()=>{ month.setMonth(month.getMonth()-1); render(); });
-next.addEventListener("click", ()=>{ month.setMonth(month.getMonth()+1,1); render(); });
-today.addEventListener("click", ()=>{ month=new Date(); month.setDate(1); render(); });
-clearBtn.addEventListener("click", ()=>{ selStart=null; selEnd=null; block.disabled=!session; hint.textContent="Tap a start date to begin."; render(); });
+next.addEventListener("click", ()=>{ month.setMonth(month.getMonth()+1); render(); });
+today.addEventListener("click", ()=>{ month = new Date(); month.setDate(1); render(); });
+clearBtn.addEventListener("click", ()=>{ 
+  selStart=null; selEnd=null; 
+  block.disabled=!session; 
+  hint.textContent="Tap a start date to begin."; 
+  render(); 
+});
 block.addEventListener("click", addBooking);
 
 /* boot */
-render(); refreshSession();
+render(); 
+refreshSession();
 </script>
 </body>
 </html>
